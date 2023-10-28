@@ -21,6 +21,9 @@ struct Args {
     /// The maximum file size of copied non-image files in MiB
     #[arg(short, long, default_value_t = 20)]
     max_file_size: u64,
+    /// If false, files that already exist will not be reencoded
+    #[arg(short, long, default_value_t = false)]
+    clean: bool,
 }
 
 fn main() -> Result<()> {
@@ -46,7 +49,7 @@ fn main() -> Result<()> {
         .filter_map(|e| e.ok())
     {
         if match entry.path().extension().and_then(OsStr::to_str) {
-            Some("jpg" | "JPG" | "png" | "PNG") => {
+            Some("jpg" | "JPG" | "png" | "PNG" | "jpeg") => {
                 println!("{}", entry.path().display());
                 // convert to a smaller file size
                 convert_image(entry.path(), &args)?;
@@ -120,23 +123,25 @@ fn convert_image(source_path: &Path, args: &Args) -> Result<()> {
     if let Some(p) = destination_path.parent() {
         std::fs::create_dir_all(p)?;
     }
-    // Create low quality default version
-    Command::new("convert")
-        .arg(source_path)
-        .arg("-strip")
-        .arg("-interlace")
-        .arg("Plane")
-        .arg("-gaussian-blur")
-        .arg("0.05")
-        .arg("-quality")
-        .arg("85%")
-        .arg("-resize")
-        .arg("1920x1920")
-        .arg(&destination_path)
-        .output()?;
+    // Create normal quality default version
+    if args.clean || !destination_path.exists() {
+        Command::new("convert")
+            .arg(source_path)
+            .arg("-strip")
+            .arg("-interlace")
+            .arg("Plane")
+            .arg("-gaussian-blur")
+            .arg("0.05")
+            .arg("-quality")
+            .arg("85%")
+            .arg("-resize")
+            .arg("1920x1920")
+            .arg(&destination_path)
+            .output()?;
+    }
     if destination_path.metadata().unwrap().len() > source_path.metadata().unwrap().len() {
         // This particular file is smaller as its original size than as a downsized jpg so use the original image
-        let mut destination_path = get_destination_path(source_path, &args)?;
+        let destination_path = get_destination_path(source_path, &args)?;
         std::fs::copy(&source_path, &destination_path).wrap_err_with(|| {
             format!(
                 "source: {}, destination: {}",
@@ -146,34 +151,39 @@ fn convert_image(source_path: &Path, args: &Args) -> Result<()> {
         })?;
     }
     // Check if it's worth creating a higher res version
-    let img = image::open(source_path)?;
-    if img.width() >= 3840 || img.height() >= 3840 {
+    {
         let mut destination_path = destination_path.clone();
         let org_file_name = destination_path.file_stem().unwrap().to_string_lossy();
         let org_extension = destination_path.extension().unwrap().to_string_lossy();
         destination_path.set_file_name(format!("{org_file_name}_high.{org_extension}"));
-        Command::new("convert")
-            .arg(source_path)
-            .arg("-strip")
-            .arg("-interlace")
-            .arg("Plane")
-            // .arg("-gaussian-blur")
-            // .arg("0.02")
-            .arg("-quality")
-            .arg("85%")
-            .arg("-resize")
-            .arg("3840x3840")
-            .arg(&destination_path)
-            .output()?;
-        // Sometimes the resulting file is larger than the original. In that case, copy the original to the new destination instead.
-        if destination_path.metadata().unwrap().len() > source_path.metadata().unwrap().len() {
-            std::fs::copy(&source_path, &destination_path).wrap_err_with(|| {
-                format!(
-                    "source: {}, destination: {}",
-                    source_path.display(),
-                    destination_path.display()
-                )
-            })?;
+        println!("high_path: {destination_path:?}");
+        if args.clean || !destination_path.exists() {
+            // let img = image::open(source_path)?;
+            // if img.width() >= 3840 || img.height() >= 3840 {
+            Command::new("convert")
+                .arg(source_path)
+                .arg("-strip")
+                .arg("-interlace")
+                .arg("Plane")
+                // .arg("-gaussian-blur")
+                // .arg("0.02")
+                .arg("-quality")
+                .arg("85%")
+                .arg("-resize")
+                .arg("3840x3840")
+                .arg(&destination_path)
+                .output()?;
+            // Sometimes the resulting file is larger than the original. In that case, copy the original to the new destination instead.
+            if destination_path.metadata().unwrap().len() > source_path.metadata().unwrap().len() {
+                std::fs::copy(&source_path, &destination_path).wrap_err_with(|| {
+                    format!(
+                        "source: {}, destination: {}",
+                        source_path.display(),
+                        destination_path.display()
+                    )
+                })?;
+            }
+            // }
         }
     }
     // Create a thumbnail version
@@ -181,19 +191,22 @@ fn convert_image(source_path: &Path, args: &Args) -> Result<()> {
     let org_file_name = destination_path.file_stem().unwrap().to_string_lossy();
     let org_extension = destination_path.extension().unwrap().to_string_lossy();
     destination_path.set_file_name(format!("{org_file_name}_thumb.{org_extension}"));
-    Command::new("convert")
-        .arg(source_path)
-        .arg("-strip")
-        .arg("-interlace")
-        .arg("Plane")
-        .arg("-gaussian-blur")
-        .arg("0.01")
-        .arg("-quality")
-        .arg("85%")
-        .arg("-resize")
-        .arg("640x640")
-        .arg(&destination_path)
-        .output()?;
+    println!("thumb_path: {destination_path:?}");
+    if args.clean || !destination_path.exists() {
+        Command::new("convert")
+            .arg(source_path)
+            .arg("-strip")
+            .arg("-interlace")
+            .arg("Plane")
+            .arg("-gaussian-blur")
+            .arg("0.01")
+            .arg("-quality")
+            .arg("85%")
+            .arg("-resize")
+            .arg("640x640")
+            .arg(&destination_path)
+            .output()?;
+    }
     Ok(())
 
     // convert "$f" \
